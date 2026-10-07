@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estudo sobre frestas n1 — protótipo web</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;1,400&family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f0ebe0;--room:#e7e0d1;--fg:#1d1b18;--mut:#7a7367;--acc:#c2410c;--cell:#1d4e6b;--line:#d3cab8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14110f;--room:#1d1915;--fg:#ece5d8;--mut:#9a9183;--acc:#ff8a4c;--cell:#5fb0d9;--line:#2e2924}}
+:root[data-theme="dark"]{--bg:#14110f;--room:#1d1915;--fg:#ece5d8;--mut:#9a9183;--acc:#ff8a4c;--cell:#5fb0d9;--line:#2e2924}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 "IBM Plex Mono",ui-monospace,monospace}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+main{max-width:860px;margin:0 auto;padding:20px 16px 40px}
+h1{font:italic 400 clamp(26px,6vw,40px)/1.1 Fraunces,Georgia,serif;margin:0 0 6px}
+h1 em{color:var(--acc)}
+p{color:var(--mut);margin:0 0 16px;max-width:60ch}
+#stage{position:relative;display:flex;justify-content:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 0}
+canvas{touch-action:none;cursor:crosshair;max-width:100%}
+#go{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--acc);color:var(--bg);border:0;padding:14px 22px;font:inherit;font-size:14px;cursor:pointer;border-radius:2px}
+#meters{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+.m b{font-weight:400;color:var(--mut)}.m i{display:block;height:4px;background:var(--line);margin:4px 0}.m u{display:block;height:100%;background:var(--acc);width:0}
+#ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px 22px}
+label{display:block}label output{float:right;color:var(--acc)}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.row button{background:none;border:1px solid var(--line);color:var(--fg);font:inherit;padding:6px 12px;cursor:pointer;border-radius:2px}
+.row button.on{border-color:var(--acc);color:var(--acc)}
+</style></head><body><main>
+<h1>Estudo sobre frestas <em>n1</em></h1>
+<p>Protótipo web · em processo. Arraste o ponto pela sala. Perto de uma fonte, ela se abre; longe, fica abafada e vaza pelas frestas. Use fones.</p>
+<div id="stage"><canvas id="c"></canvas><button id="go">Entrar no campo ▸</button></div>
+<section id="meters"></section>
+<section id="ctl"></section>
+<div class="row" id="modes"></div>
+<div class="row" id="presets"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s),clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+const P={W:10,H:6,sig:3.5,n:3,vaza:.15,gama:2,modo:'kernel'};
+const NOM=['Norte','Leste','Sul','Oeste'],DX=.5,DF=.25,TM=4,SF=1,SS=.8,SL=2,KF=10,VMAX=.8,EPS=.05,dt=.05,pad=24;
+const S=()=>[[P.W/2,P.H],[P.W,P.H/2],[P.W/2,0],[0,P.H/2]];
+const gauss=()=>Math.sqrt(-2*Math.log(Math.random()||1e-9))*Math.cos(6.283*Math.random());
+const mkNoise=()=>{let a=Math.random()*2-1,b=Math.random()*2-1,ph=0;return(f)=>{ph+=dt*f;if(ph>=1){ph-=1;a=b;b=Math.random()*2-1}return a+(b-a)*ph}};
+let me={p:[5,3],v:[0,0]},prev=[5,3],walk=[],F={},gs=[0,0,0,0],as=[0,0,0,0],fcs=[0,0,0,0],A=null,sc=40,dpr=1;
+const nz1=[0,1,2,3].map(mkNoise),nz2=[0,1,2,3].map(mkNoise);
+
+/* ---- campo fluido [F12]: difusão - advecção(upwind) - decaimento + fontes ---- */
+function build(){
+  const nx=Math.round(P.W/DX),ny=Math.round(P.H/DX),N=nx*ny,cx=new Float32Array(N),cy=new Float32Array(N);
+  for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){cx[y*nx+x]=(x+.5)*DX;cy[y*nx+x]=(y+.5)*DX}
+  const Wr=S().map(s=>{const w=new Float32Array(N);let t=0;for(let c=0;c<N;c++){w[c]=Math.exp(-((cx[c]-s[0])**2+(cy[c]-s[1])**2)/(2*SL*SL));t+=w[c]}for(let c=0;c<N;c++)w[c]/=t;return w});
+  F={nx,ny,N,cx,cy,Wr,r:new Float32Array(N)};
+}
+function fluidStep(pos,vel){
+  const {nx,ny,N,cx,cy,r}=F,src=new Float32Array(N),ux=new Float32Array(N),uy=new Float32Array(N),den=new Float32Array(N),div=new Float32Array(N),nr=new Float32Array(N);
+  pos.forEach((p,k)=>{const g=new Float32Array(N);let s=0;
+    for(let c=0;c<N;c++){g[c]=Math.exp(-((cx[c]-p[0])**2+(cy[c]-p[1])**2)/(2*SS*SS));s+=g[c]}
+    for(let c=0;c<N;c++){src[c]+=SF*g[c]/((s||1)*DX*DX);den[c]+=g[c];ux[c]+=g[c]*vel[k][0];uy[c]+=g[c]*vel[k][1]}});
+  for(let c=0;c<N;c++){ux[c]/=den[c]+EPS;uy[c]/=den[c]+EPS}
+  for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const i=y*nx+x;
+    if(x<nx-1){const u=.5*(ux[i]+ux[i+1]),f=u*(u>0?r[i]:r[i+1])/DX;div[i]+=f;div[i+1]-=f}
+    if(y<ny-1){const j=i+nx,v=.5*(uy[i]+uy[j]),f=v*(v>0?r[i]:r[j])/DX;div[i]+=f;div[j]-=f}}
+  for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const i=y*nx+x;
+    const lap=(r[x>0?i-1:i]+r[x<nx-1?i+1:i]+r[y>0?i-nx:i]+r[y<ny-1?i+nx:i]-4*r[i])/(DX*DX);
+    nr[i]=Math.max(0,r[i]+dt*(DF*lap-div[i]-r[i]/TM+src[i]))}
+  F.r=nr;
+  return F.Wr.map(w=>{let s=0;for(let c=0;c<N;c++)s+=w[c]*nr[c];return 1-Math.exp(-KF*s)});
+}
+
+/* ---- simulação + ponte para o áudio (20 Hz) ---- */
+function tick(){
+  walk.length=Math.min(walk.length,P.n-1);
+  while(walk.length<P.n-1){const a=Math.random()*6.283;walk.push({p:[Math.random()*P.W,Math.random()*P.H],v:[.3*Math.cos(a),.3*Math.sin(a)]})}
+  const lim=[P.W,P.H];
+  for(const a of walk){a.v[0]+=gauss()*.5*dt;a.v[1]+=gauss()*.5*dt;const r=Math.hypot(...a.v);if(r>VMAX){a.v[0]*=VMAX/r;a.v[1]*=VMAX/r}
+    for(let k=0;k<2;k++){a.p[k]+=a.v[k]*dt;if(a.p[k]<0||a.p[k]>lim[k]){a.v[k]*=-1;a.p[k]=clamp(a.p[k],0,lim[k])}}}
+  me.v=me.v.map((v,k)=>.7*v+.3*(me.p[k]-prev[k])/dt);prev=[...me.p];
+  const pos=[me.p,...walk.map(a=>a.p)],vel=[me.v,...walk.map(a=>a.v)],Sp=S();
+  const w=Sp.map(s=>pos.map(p=>Math.exp(-((p[0]-s[0])**2+(p[1]-s[1])**2)/(2*P.sig**2))));        // [F1][F2]
+  const agit=w.map(wi=>wi.reduce((t,x,k)=>t+x*Math.hypot(...vel[k]),0)/(wi.reduce((t,x)=>t+x,0)+EPS)); // [F6]
+  let g,tau;
+  if(P.modo=='kernel'){g=w.map(wi=>1-Math.exp(-2*wi.reduce((t,x)=>t+x,0)));tau=1.5+10.5*(1-Math.exp(-(P.n-1)/3))}  // [F3][F4][F5]
+  else{g=fluidStep(pos,vel);tau=.25}
+  audio(g,agit,tau);
+  document.querySelectorAll('.m').forEach((m,i)=>{m.querySelector('u').style.width=(gs[i]*100)+'%';m.querySelector('span').textContent=Math.round(fcs[i])+' Hz'});
+}
+
+/* ---- motor Web Audio (equivalente ao SynthDef \campo) ---- */
+async function boot(){
+  const ctx=new AudioContext();await ctx.resume();
+  const bufs=await Promise.all([0,1,2,3].map(async i=>ctx.decodeAudioData(await (await fetch('audio/'+i+'.wav')).arrayBuffer())));
+  const hp=ctx.createBiquadFilter();hp.type='highpass';hp.frequency.value=20;
+  const cp=ctx.createDynamicsCompressor();cp.threshold.value=-6;cp.knee.value=0;cp.ratio.value=20;cp.attack.value=.003;cp.release.value=.1;
+  hp.connect(cp);cp.connect(ctx.destination);
+  const pans=[-.2,.8,.2,-.8],lp=(f)=>{const n=ctx.createBiquadFilter();n.type='lowpass';n.Q.value=0;n.frequency.value=f;return n};
+  const mix=[0,1,2,3].map(i=>{const m=ctx.createGain(),p=ctx.createStereoPanner();p.pan.value=pans[i];m.connect(p);p.connect(hp);return m});
+  const ch=bufs.map((b,i)=>{
+    const d=b.getChannelData(0);let s=0;for(let k=0;k<d.length;k++)s+=d[k]*d[k];
+    const src=ctx.createBufferSource();src.buffer=b;src.loop=true;
+    const nm=ctx.createGain();nm.gain.value=Math.min(.1/Math.max(Math.sqrt(s/d.length),1e-6),20);   // [S5]
+    const f1=lp(1000),f2=lp(1000),dry=ctx.createGain();dry.gain.value=0;
+    src.connect(nm);nm.connect(f1);f1.connect(f2);f2.connect(dry);dry.connect(mix[i]);
+    const dl=ctx.createDelay(.5);dl.delayTime.value=.1+i*.037;const lk=lp(400),lg=ctx.createGain();lg.gain.value=0;    // [S7]
+    nm.connect(dl);dl.connect(lk);lk.connect(lg);
+    for(let j=0;j<4;j++)if(j!=i){const t=ctx.createGain();t.gain.value=1/3;lg.connect(t);t.connect(mix[j])}
+    src.start(0);return{src,f1,f2,dry,lg};
+  });
+  A={ctx,ch};
+}
+function audio(g,agit,tau){
+  for(let i=0;i<4;i++){
+    gs[i]+=(g[i]-gs[i])*(1-Math.exp(-dt/tau));as[i]=clamp(as[i]+(agit[i]-as[i])*(1-Math.exp(-dt/.3)),0,2);   // [S1]
+    const gi=clamp(gs[i],0,1),n1=nz1[i](4),n2=nz2[i](1);
+    fcs[i]=clamp(300*Math.pow(40,gi)*Math.pow(2,as[i]*.5*n1),100,18000);                                      // [S3][S4]
+    if(!A)continue;const t=A.ctx.currentTime,c=A.ch[i];
+    c.dry.gain.setTargetAtTime(Math.pow(gi,P.gama),t,.04);                                                    // [S2]
+    c.f1.frequency.setTargetAtTime(fcs[i],t,.04);c.f2.frequency.setTargetAtTime(fcs[i],t,.04);
+    c.src.playbackRate.setTargetAtTime(1+as[i]*.01*n2,t,.04);                                                 // [S6]
+    c.lg.gain.setTargetAtTime((1-gi)*P.vaza,t,.04);
+  }
+}
+
+/* ---- desenho ---- */
+const cs=getComputedStyle(document.documentElement),C=n=>cs.getPropertyValue(n).trim();
+function draw(){
+  const cv=$('#c'),x=cv.getContext('2d'),s=sc,H=P.H,px=p=>[pad+p[0]*s,pad+(H-p[1])*s];
+  x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,cv.width,cv.height);
+  x.fillStyle=C('--room');x.fillRect(pad,pad,P.W*s,H*s);
+  if(P.modo=='fluido'){x.fillStyle=C('--cell');for(let c=0;c<F.N;c++){x.globalAlpha=clamp(F.r[c]/.15,0,1);const[a,b]=px([F.cx[c]-DX/2,F.cy[c]+DX/2]);x.fillRect(a,b,DX*s+.5,DX*s+.5)}x.globalAlpha=1}
+  S().forEach((q,i)=>{const[a,b]=px(q),g=gs[i];
+    if(P.modo=='kernel'){x.setLineDash([3,5]);x.strokeStyle=C('--mut');x.beginPath();x.arc(a,b,P.sig*s,0,6.283);x.save();x.beginPath();x.rect(pad,pad,P.W*s,H*s);x.clip();x.beginPath();x.arc(a,b,P.sig*s,0,6.283);x.stroke();x.restore();x.setLineDash([])}
+    x.fillStyle=C('--acc');x.globalAlpha=.2+.8*g;x.beginPath();x.arc(a,b,10+16*g,0,6.283);x.fill();x.globalAlpha=1;
+    x.fillStyle=C('--fg');x.font='12px "IBM Plex Mono",monospace';x.textAlign='center';x.textBaseline='middle';x.fillText(NOM[i][0],a,b)});
+  x.fillStyle=C('--mut');walk.forEach(a=>{const[u,v]=px(a.p);x.beginPath();x.arc(u,v,4,0,6.283);x.fill()});
+  const[u,v]=px(me.p);x.fillStyle=C('--fg');x.beginPath();x.arc(u,v,6,0,6.283);x.fill();x.strokeStyle=C('--acc');x.lineWidth=2;x.beginPath();x.arc(u,v,10,0,6.283);x.stroke();x.lineWidth=1;
+  requestAnimationFrame(draw);
+}
+function resize(){
+  const avail=$('#stage').clientWidth-2*pad-4,maxH=innerHeight*.55-2*pad;
+  sc=Math.max(4,Math.min(avail/P.W,maxH/P.H));dpr=devicePixelRatio||1;
+  const cv=$('#c'),w=P.W*sc+2*pad,h=P.H*sc+2*pad;cv.style.width=w+'px';cv.style.height=h+'px';cv.width=w*dpr;cv.height=h*dpr;
+}
+function reconfig(){
+  me.p=[clamp(me.p[0],0,P.W),clamp(me.p[1],0,P.H)];prev=[...me.p];
+  walk.forEach(a=>{a.p=[clamp(a.p[0],0,P.W),clamp(a.p[1],0,P.H)]});build();resize();
+}
+
+/* ---- interface ---- */
+const defs=[['W','Largura da sala (m)',4,30,.5],['H','Profundidade da sala (m)',3,20,.5],['sig','σ · alcance de cada fonte (m)',1,8,.1],['n','Visitantes (você + simulados)',1,10,1],['vaza','Vazamento cruzado',0,.4,.01],['gama','γ · curva perceptual',1,3,.1]];
+function ui(){
+  $('#ctl').innerHTML=defs.map(([k,l,a,b,s])=>`<label>${l}<output id="o_${k}">${P[k]}</output><input type="range" id="r_${k}" min="${a}" max="${b}" step="${s}" value="${P[k]}"></label>`).join('');
+  defs.forEach(([k])=>{$('#r_'+k).oninput=e=>{P[k]=+e.target.value;$('#o_'+k).textContent=P[k];if(k=='W'||k=='H')reconfig()}});
+  $('#meters').innerHTML=NOM.map(n=>`<div class="m"><b>${n}</b><i><u></u></i><span></span></div>`).join('');
+  $('#modes').innerHTML='<span style="align-self:center;color:var(--mut)">campo:</span>'+['kernel','fluido'].map(m=>`<button data-m="${m}" class="${m==P.modo?'on':''}">${m}</button>`).join('');
+  $('#modes').onclick=e=>{const m=e.target.dataset.m;if(!m)return;P.modo=m;document.querySelectorAll('[data-m]').forEach(b=>b.classList.toggle('on',b.dataset.m==m))};
+  $('#presets').innerHTML='<span style="align-self:center;color:var(--mut)">sala:</span>'+[['pequena',6,4],['média',10,6],['grande',20,12]].map(([n,w,h])=>`<button data-w="${w}" data-h="${h}">${n} ${w}×${h} m</button>`).join('');
+  $('#presets').onclick=e=>{const w=e.target.dataset.w;if(!w)return;P.W=+w;P.H=+e.target.dataset.h;['W','H'].forEach(k=>{$('#r_'+k).value=P[k];$('#o_'+k).textContent=P[k]});reconfig()};
+}
+const cv=$('#c'),mv=e=>{const r=cv.getBoundingClientRect();me.p=[clamp((e.clientX-r.left-pad)/sc,0,P.W),clamp(P.H-(e.clientY-r.top-pad)/sc,0,P.H)]};
+cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);cv.dragging=true;mv(e)};
+cv.onpointermove=e=>{if(cv.dragging)mv(e)};cv.onpointerup=()=>cv.dragging=false;
+$('#go').onclick=async()=>{const g=$('#go');g.textContent='carregando…';try{await boot();g.remove()}catch(e){g.textContent='erro: '+e.message}};
+addEventListener('resize',resize);
+ui();build();resize();setInterval(tick,dt*1000);draw();
+</script></body></html>
