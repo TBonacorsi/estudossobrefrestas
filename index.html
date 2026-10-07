@@ -87,7 +87,7 @@ function tick(){
 /* ---- motor Web Audio (equivalente ao SynthDef \campo) ---- */
 async function boot(){
   const ctx=new AudioContext();await ctx.resume();
-  const bufs=await Promise.all([0,1,2,3].map(async i=>ctx.decodeAudioData(await (await fetch('audio/'+i+'.wav')).arrayBuffer())));
+  const bufs=await Promise.all([0,1,2,3].map(async i=>ctx.decodeAudioData(await (await fetch(i+'.wav')).arrayBuffer())));
   const hp=ctx.createBiquadFilter();hp.type='highpass';hp.frequency.value=20;
   const cp=ctx.createDynamicsCompressor();cp.threshold.value=-6;cp.knee.value=0;cp.ratio.value=20;cp.attack.value=.003;cp.release.value=.1;
   hp.connect(cp);cp.connect(ctx.destination);
