@@ -12,6 +12,4 @@ O espaço expositivo não é neutro.
 Nunca foi. 
 Ele é atravessado por corpos em movimento, por presenças que se acumulam e se dispersam, por fluxos que nenhum software de espacialização ainda aprendeu a manipular. É nesse intervalo; entre o que o sistema calcula e o que o corpo sente, que a instalação existe.
 
-Resumo para projeto:
-Inspirada no pensamento de Rodolfo Caesar (2020) sobre o som como transporte de coisas que vazam, Estudo sobre frestas n1 é uma instalação sonora imersiva que responde à presença e ao movimento dos visitantes em tempo real. O espaço expositivo é dividido em n zonas sonoras independentes, cada uma associada a uma gravação de campo da região. A posição do visitante, coletada via posição do celular, determina continuamente quais camadas são audíveis e em qual intensidade, sem cortes, sem hierarquia, sem trilha linear. A composição emerge do deslocamento. Todo o processo interativo é invisível. Com múltiplos visitantes simultâneos, o sistema se comporta como um campo de forças: cada presença perturba o equilíbrio sonoro do espaço, e o resultado coletivo produz uma composição que nenhum agente isolado poderia gerar. O som flui, se acumula e se dispersa conforme os corpos que o atravessam.
 
